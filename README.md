@@ -42,6 +42,21 @@ pip install -r requirements.txt
 6. Connect your logic to the Streamlit UI in `app.py`.
 7. Refine UML so it matches what you actually built.
 
+## Features
+
+| Feature                       | Description                                                                                                                                                         |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Add owners & pets**         | Create an owner profile and register multiple pets, each tracked independently.                                                                                     |
+| **Task management**           | Add care tasks to any pet with a description, frequency, and optional scheduled time.                                                                               |
+| **Sorting by time**           | The schedule is always displayed in chronological order (earliest first). Tasks without a scheduled time are sorted to the bottom automatically.                    |
+| **Filtering**                 | Filter the schedule by pet name, by completion status (pending only), or both at once — without touching any other pet's data.                                      |
+| **Conflict warnings**         | Before displaying the schedule, the app scans for tasks booked at the exact same time for the same pet and surfaces a clear warning banner for each conflict found. |
+| **Daily & weekly recurrence** | Completing a `daily` or `weekly` task automatically schedules the next occurrence (+1 day or +7 days). One-time and monthly tasks are simply marked done.           |
+| **Schedule metrics**          | A summary row shows total tasks, pending count, and completed count for the current filtered view.                                                                  |
+| **Status indicators**         | Task completion is displayed as ✅ Done / ⏳ Pending throughout the UI instead of raw boolean values.                                                               |
+
+---
+
 ## Smarter Scheduling
 
 Phase 2 adds intelligent scheduling algorithms to the `Scheduler` class, making PawPal+ more useful and reliable for pet owners.
@@ -66,7 +81,8 @@ Two methods allow owners to quickly find the tasks they care about:
 `detect_conflicts()` scans each pet's task list for tasks booked at the exact same time and returns plain-text warning messages. Conflicts are only flagged within the same pet's schedule. Returns an empty list when no conflicts exist — safe to iterate without any extra checks.
 
 ## Testing PawPal+
-1. python -m pytest.          Confidence Level ⭐️ ⭐️ ⭐️ ⭐️
+
+1. python -m pytest. Confidence Level ⭐️ ⭐️ ⭐️ ⭐️
 
 The test cover
 Creates a bare Task and verifies it starts as incomplete (completed=False). Calls mark_complete() and confirms the flag flips to True. Tests the most basic state change on a Task.
@@ -85,3 +101,11 @@ Gives a pet two tasks at the same time (10:00) and one at a different time (11:0
 
 `test_detect_conflicts_no_false_positives()`
 Gives a pet two tasks at different times and confirms detect_conflicts() returns an empty list — ensuring the method doesn't generate false alarms when there are no real conflicts.
+
+## Demo
+
+
+<a href="pawpal_screenshot.png" target="_blank"><img src='pawpal_screenshot.png'/>
+
+
+![alt text](pawpal_screenshot.png)

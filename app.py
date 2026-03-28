@@ -1,4 +1,5 @@
 import streamlit as st
+from datetime import datetime
 from pawpal_system import Owner, Pet, Task, Scheduler
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
@@ -63,6 +64,19 @@ else:
     st.info("No pets added yet. Add one above.")
 
 st.divider()
+st.subheader("Owner Preferences")
+st.caption("These constraints limit how the daily schedule is built.")
+col1, col2 = st.columns(2)
+with col1:
+    max_tasks = st.number_input("Max tasks per day", min_value=1, max_value=20, value=5, key="pref_max_tasks")
+with col2:
+    available_minutes = st.number_input("Available time (minutes)", min_value=10, max_value=480, value=90, key="pref_minutes")
+st.session_state.owner.set_preferences({
+    'max_tasks_per_day': int(max_tasks),
+    'available_minutes': int(available_minutes),
+})
+
+st.divider()
 st.markdown("### Tasks")
 st.caption("Select a pet and add tasks to their schedule.")
 
@@ -77,8 +91,23 @@ if st.session_state.owner.pets:
     with col2:
         task_frequency = st.selectbox("Frequency", ["daily", "weekly", "monthly", "once"])
 
+    col3, col4 = st.columns(2)
+    with col3:
+        task_duration = st.number_input("Duration (minutes)", min_value=0, max_value=300, value=30, key="task_duration")
+    with col4:
+        task_priority = st.selectbox("Priority", ["high", "medium", "low"], index=1, key="task_priority")
+
+    col5, col6 = st.columns(2)
+    with col5:
+        use_time = st.checkbox("Set a start time?", value=False, key="task_use_time")
+    with col6:
+        task_time_input = st.time_input("Start time", value=None, key="task_time") if use_time else None
+
     if st.button("Add Task"):
-        new_task = Task(description=task_description, frequency=task_frequency)
+        task_time = None
+        if use_time and task_time_input is not None:
+            task_time = datetime.combine(datetime.today().date(), task_time_input)
+        new_task = Task(description=task_description, frequency=task_frequency, duration=int(task_duration), priority=task_priority, time=task_time)
         selected_pet.add_task(new_task)
         st.success(f"Added '{task_description}' to {selected_pet.name}'s tasks!")
 
@@ -86,31 +115,64 @@ if st.session_state.owner.pets:
         tasks = pet.get_tasks()
         if tasks:
             st.write(f"**{pet.name}'s tasks:**")
-            st.table([{"Description": t.description, "Frequency": t.frequency, "Completed": t.completed} for t in tasks])
+            st.table([
+                {
+                    "Description": t.description,
+                    "Priority": t.priority,
+                    "Duration": f"{t.duration} min" if t.duration else "—",
+                    "Frequency": t.frequency,
+                    "Status": "✅ Done" if t.completed else "⏳ Pending",
+                }
+                for t in tasks
+            ])
 else:
     st.info("Add a pet first to start adding tasks.")
 
 st.divider()
 
 st.subheader("Build Schedule")
-st.caption("Retrieve and display all tasks across all pets using the Scheduler.")
+st.caption("Generates today's plan ordered by priority, capped by your time and task limits.")
 
 if st.button("Generate Schedule"):
     scheduler = Scheduler(st.session_state.owner)
-    all_tasks = scheduler.get_all_tasks()
-    if all_tasks:
-        st.success("Today's Schedule:")
-        rows = []
-        for task in all_tasks:
-            pet_name_for_task = next(
-                (p.name for p in st.session_state.owner.pets if task in p.tasks), "Unknown"
-            )
-            rows.append({
-                "Pet": pet_name_for_task,
-                "Task": task.description,
-                "Frequency": task.frequency,
-                "Completed": task.completed,
-            })
-        st.table(rows)
+
+    # Conflict warnings
+    conflicts = scheduler.detect_conflicts()
+    if conflicts:
+        st.error(f"⚠️ {len(conflicts)} scheduling conflict{'s' if len(conflicts) > 1 else ''} detected!")
+        with st.expander("View conflicts", expanded=True):
+            for conflict in conflicts:
+                st.warning(conflict)
     else:
-        st.warning("No tasks found. Add pets and tasks first.")
+        st.success("✅ No scheduling conflicts found.")
+
+    # Generate the prioritized, constraint-aware plan
+    schedule = scheduler.generate_schedule()
+
+    if schedule:
+        total_duration = sum(task.duration for _, task, _ in schedule)
+        prefs = st.session_state.owner.preferences
+
+        st.success("Today's Schedule")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Tasks Selected", len(schedule))
+        m2.metric("Total Time", f"{total_duration} min")
+        m3.metric("Time Budget", f"{prefs.get('available_minutes', 90)} min")
+
+        rows = []
+        for pet, task, reason in schedule:
+            rows.append({
+                "Pet": pet.name,
+                "Task": task.description,
+                "Priority": task.priority,
+                "Duration": f"{task.duration} min" if task.duration else "—",
+                "Time": task.time.strftime("%H:%M") if task.time else "—",
+                "Frequency": task.frequency,
+                "Why": reason,
+            })
+        st.dataframe(rows, use_container_width=True)
+
+        with st.expander("📋 Plan explanation", expanded=False):
+            st.text(scheduler.explain_plan())
+    else:
+        st.warning("No tasks selected. Add tasks to your pets or adjust preferences.")

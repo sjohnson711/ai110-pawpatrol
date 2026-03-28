@@ -12,13 +12,15 @@ if TYPE_CHECKING:
 class Task:
     """Represents a single activity for a pet."""
     _id_counter = 1
-    def __init__(self, description: str, time: Optional[datetime] = None, frequency: str = '', completed: bool = False):
+    def __init__(self, description: str, time: Optional[datetime] = None, frequency: str = '', completed: bool = False, duration: int = 0, priority: str = 'medium'):
         self.task_id = Task._id_counter
         Task._id_counter += 1
         self.description = description
         self.time = time
         self.frequency = frequency
         self.completed = completed
+        self.duration = duration      # estimated minutes to complete
+        self.priority = priority      # 'high', 'medium', or 'low'
 
     def mark_complete(self):
         """Mark this task as complete."""
@@ -54,13 +56,21 @@ class Pet:
 # Owner class
 class Owner:
     """Manages multiple pets and provides access to all their tasks."""
-    def __init__(self, name: str):
+    def __init__(self, name: str, preferences: Optional[Dict] = None):
         self.name = name
         self.pets: List[Pet] = []
+        self.preferences: Dict = preferences if preferences is not None else {
+            'max_tasks_per_day': 5,
+            'available_minutes': 90,
+        }
 
     def add_pet(self, pet: Pet) -> None:
         """Add a pet to this owner."""
         self.pets.append(pet)
+
+    def set_preferences(self, prefs: Dict) -> None:
+        """Update owner preferences with the given key-value pairs."""
+        self.preferences.update(prefs)
 
     def get_all_tasks(self) -> List[Task]:
         """Return all tasks for all pets owned by this owner."""
@@ -178,7 +188,9 @@ class Scheduler:
             next_task = Task(
                 description=task.description,   # same activity name
                 time=task.time + delta,          # shift the time forward by one interval
-                frequency=task.frequency         # preserve the same recurrence pattern
+                frequency=task.frequency,        # preserve the same recurrence pattern
+                duration=task.duration,          # preserve original duration
+                priority=task.priority,          # preserve original priority
             )
             # Step 5: Add the new task directly to the same pet's task list.
             # The Scheduler owns this orchestration — Pet and Task stay simple.
@@ -222,7 +234,7 @@ class Scheduler:
             shared time, and the pet's name. Returns an empty list if no conflicts
             are found — the caller can safely iterate without checking for None.
         """
-        warnings = []
+        warnings: List[str] = []
         # Check each pet independently — a conflict only matters within the same pet's schedule
         for pet in self.owner.pets:
             # Only consider tasks that actually have a time set
@@ -238,3 +250,64 @@ class Scheduler:
                             f"are both scheduled at {time_str} for {pet.name}."
                         )
         return warnings
+
+    def generate_schedule(self) -> List[tuple]:
+        """Select and order tasks for today based on priority and owner constraints.
+
+        Picks from all pending (incomplete) tasks across every pet. Tasks are ranked
+        by priority (high → medium → low) then by scheduled time. Selection stops
+        when either the max_tasks_per_day limit or the available_minutes budget is
+        exhausted. Each returned tuple carries enough context to render a rich UI row.
+
+        Returns:
+            A list of (pet, task, reason) tuples for selected tasks, where reason is
+            a human-readable string explaining why the task was chosen and when it
+            happens (e.g. 'Selected – high priority · 30 min · 60 min remaining').
+        """
+        _priority_rank = {'high': 0, 'medium': 1, 'low': 2}
+        max_tasks = self.owner.preferences.get('max_tasks_per_day', 5)
+        available_minutes = self.owner.preferences.get('available_minutes', 90)
+
+        # Build (pet, task) pairs for all pending tasks
+        candidates = [
+            (pet, task)
+            for pet in self.owner.pets
+            for task in pet.get_tasks()
+            if not task.completed
+        ]
+
+        # Sort by priority rank, then by scheduled time (timeless tasks go last)
+        candidates.sort(
+            key=lambda pt: (_priority_rank.get(pt[1].priority, 1), pt[1].time if pt[1].time else datetime.max)
+        )
+
+        selected = []
+        minutes_used = 0
+        for pet, task in candidates:
+            if len(selected) >= max_tasks:
+                break
+            if task.duration > 0 and minutes_used + task.duration > available_minutes:
+                continue  # skip this task — not enough time, try lower-priority ones
+            minutes_used += task.duration
+            time_str = task.time.strftime('%H:%M') if task.time else 'anytime'
+            mins_remaining = available_minutes - minutes_used
+            reason = (
+                f"Selected – {task.priority} priority · "
+                f"{task.duration} min · {mins_remaining} min remaining after"
+                if task.duration > 0
+                else f"Selected – {task.priority} priority · scheduled {time_str}"
+            )
+            selected.append((pet, task, reason))
+
+        return selected
+
+    def explain_plan(self) -> str:
+        """Return a plain-text summary of the generated schedule with per-task reasoning."""
+        schedule = self.generate_schedule()
+        if not schedule:
+            return "No tasks selected for today. Add tasks or adjust preferences."
+        lines = ["Today's plan:\n"]
+        for i, (pet, task, reason) in enumerate(schedule, 1):
+            time_str = task.time.strftime('%H:%M') if task.time else 'no time set'
+            lines.append(f"  {i}. [{pet.name}] {task.description} @ {time_str} — {reason}")
+        return "\n".join(lines)

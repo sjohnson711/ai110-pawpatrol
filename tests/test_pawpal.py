@@ -100,3 +100,52 @@ def test_detect_conflicts_no_false_positives():
 
 	scheduler = Scheduler(owner)
 	assert scheduler.detect_conflicts() == []
+
+# Test that generate_schedule() respects the max_tasks_per_day preference.
+def test_generate_schedule_respects_max_tasks():
+	owner = Owner("Eve", preferences={'max_tasks_per_day': 2, 'available_minutes': 999})
+	pet = Pet(name="Luna", species="Dog")
+	owner.add_pet(pet)
+
+	for desc in ["Walk", "Feed", "Bath", "Play"]:
+		pet.add_task(Task(description=desc, frequency="daily", duration=10))
+
+	scheduler = Scheduler(owner)
+	schedule = scheduler.generate_schedule()
+
+	assert len(schedule) == 2  # capped at max_tasks_per_day
+
+# Test that generate_schedule() puts high priority tasks before low priority tasks.
+def test_generate_schedule_priority_order():
+	owner = Owner("Frank", preferences={'max_tasks_per_day': 5, 'available_minutes': 999})
+	pet = Pet(name="Bear", species="Dog")
+	owner.add_pet(pet)
+
+	low_task = Task(description="Grooming", frequency="weekly", duration=20, priority="low")
+	high_task = Task(description="Medication", frequency="daily", duration=5, priority="high")
+	pet.add_task(low_task)   # added first, but lower priority
+	pet.add_task(high_task)
+
+	scheduler = Scheduler(owner)
+	schedule = scheduler.generate_schedule()
+
+	assert schedule[0][1] is high_task   # high priority task must come first
+	assert schedule[1][1] is low_task
+
+# Test that generate_schedule() skips tasks that exceed the available_minutes budget.
+def test_generate_schedule_respects_time_budget():
+	owner = Owner("Grace", preferences={'max_tasks_per_day': 10, 'available_minutes': 30})
+	pet = Pet(name="Coco", species="Cat")
+	owner.add_pet(pet)
+
+	fits = Task(description="Feed", frequency="daily", duration=10, priority="medium")
+	too_long = Task(description="Grooming", frequency="weekly", duration=60, priority="high")
+	pet.add_task(too_long)  # high priority but won't fit
+	pet.add_task(fits)
+
+	scheduler = Scheduler(owner)
+	schedule = scheduler.generate_schedule()
+
+	descriptions = [task.description for _, task, _ in schedule]
+	assert "Feed" in descriptions       # fits within 30 min
+	assert "Grooming" not in descriptions  # 60 min exceeds budget
